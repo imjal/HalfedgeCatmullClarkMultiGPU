@@ -151,7 +151,7 @@ static void ccs__RefineHalfedges(cc_Subd *subd, int32_t depth)
     #pragma omp for
     for(int i = 0; i < NUM_GPUS; i++){
         cudaSetDevice(i);
-        RefineInnerHalfedges<<<EACH_ELEM(halfedgeCount)>>>(subd, depth, cage, halfedgeCount, vertexCount, edgeCount, faceCount, stride, halfedgesOut);
+        RefineInnerHalfedges<<<EACH_ELEM_GPU(halfedgeCount)>>>(subd, depth, cage, halfedgeCount, vertexCount, edgeCount, faceCount, stride, halfedgesOut);
     }
    
 }
@@ -163,10 +163,10 @@ static void ccs__RefineHalfedges(cc_Subd *subd, int32_t depth)
  */
 void ccs_RefineHalfedges(cc_Subd *subd)
 {
-    printf("Code has changed to Global Call\n");
     const int32_t maxDepth = ccs_MaxDepth(subd);
 
     ccs__RefineCageHalfedges(subd);
+    cudaDeviceSynchronize();
 
     for (int32_t depth = 1; depth < maxDepth; ++depth) {
         ccs__RefineHalfedges(subd, depth);
@@ -190,6 +190,7 @@ void ccs__ClearVertexPoints(cc_Subd *subd)
 __global__ void ccs__CageFacePoints_Scatter_Inner(const cc_Mesh *cage, int32_t vertexCount, int32_t halfedgeCount, cc_VertexPoint *newFacePoints)
 {
     CHECK_TID(halfedgeCount)
+    // CHECK_ASSIGN_TID(halfedgeID, halfedgeCount)
     int32_t halfedgeID = TID;
     const cc_VertexPoint vertexPoint = ccm_HalfedgeVertexPoint(cage, halfedgeID);
     const int32_t faceID = ccm_HalfedgeFaceID(cage, halfedgeID);
@@ -216,13 +217,19 @@ void ccs__CageFacePoints_Scatter(cc_Subd *subd)
     const int32_t halfedgeCount = ccm_HalfedgeCount(cage);
     cc_VertexPoint *newFacePoints = &subd->vertexPoints[vertexCount];
 
-    ccs__CageFacePoints_Scatter_Inner<<<EACH_ELEM(halfedgeCount)>>>(cage, vertexCount, halfedgeCount, newFacePoints);
+    // #pragma omp for
+    // for(int i = 0; i < NUM_GPUS; i++){
+        // cudaSetDevice(i);
+        ccs__CageFacePoints_Scatter_Inner<<<EACH_ELEM(halfedgeCount)>>>(cage, vertexCount, halfedgeCount, newFacePoints);
+    // }
+    
 
 }
 
 __global__ void ccs__CreasedCageEdgePoints_Scatter_Inner(const cc_Mesh *cage, int32_t faceCount, int32_t vertexCount, int32_t halfedgeCount, const cc_VertexPoint *newFacePoints, cc_VertexPoint *newEdgePoints)
 {
     CHECK_TID(halfedgeCount)
+    // CHECK_ASSIGN_TID(halfedgeID, halfedgeCount)
     int32_t halfedgeID = TID;
     const int32_t faceID = ccm_HalfedgeFaceID(cage, halfedgeID);
     const int32_t edgeID = ccm_HalfedgeEdgeID(cage, halfedgeID);
@@ -266,7 +273,12 @@ void ccs__CreasedCageEdgePoints_Scatter(cc_Subd *subd)
     const int32_t halfedgeCount = ccm_HalfedgeCount(cage);
     const cc_VertexPoint *newFacePoints = &subd->vertexPoints[vertexCount];
     cc_VertexPoint *newEdgePoints = &subd->vertexPoints[vertexCount + faceCount];
-    ccs__CreasedCageEdgePoints_Scatter_Inner<<<EACH_ELEM(halfedgeCount)>>>(cage, faceCount, vertexCount, halfedgeCount, newFacePoints, newEdgePoints);
+
+    // #pragma omp for
+    // for(int i = 0; i < NUM_GPUS; i++){
+        // cudaSetDevice(i);
+        ccs__CreasedCageEdgePoints_Scatter_Inner<<<EACH_ELEM(halfedgeCount)>>>(cage, faceCount, vertexCount, halfedgeCount, newFacePoints, newEdgePoints);
+    // }
 }
 
 __global__ void ccs__CreasedCageVertexPoints_Scatter_Inner(
@@ -275,6 +287,7 @@ __global__ void ccs__CreasedCageVertexPoints_Scatter_Inner(
     const cc_VertexPoint *newEdgePoints, cc_VertexPoint *newVertexPoints)
 {
     CHECK_TID(halfedgeCount)
+    // CHECK_ASSIGN_TID(halfedgeID, halfedgeCount)
     int32_t halfedgeID = TID;
     const int32_t vertexID = ccm_HalfedgeVertexID(cage, halfedgeID);
     const int32_t edgeID = ccm_HalfedgeEdgeID(cage, halfedgeID);
@@ -400,6 +413,7 @@ void ccs__CreasedCageVertexPoints_Scatter(cc_Subd *subd)
 __global__ void ccs__FacePoints_Scatter(const cc_Subd *subd, int32_t depth, const cc_Mesh *cage, int32_t halfedgeCount, int32_t vertexCount, int32_t stride, cc_VertexPoint *newFacePoints)
 {
     CHECK_TID(halfedgeCount)
+    // CHECK_ASSIGN_TID(halfedgeID, halfedgeCount)
     int32_t halfedgeID = TID;
     const cc_VertexPoint vertexPoint = ccs_HalfedgeVertexPoint(subd, halfedgeID, depth);
     const int32_t faceID = ccs_HalfedgeFaceID(subd, halfedgeID, depth);
@@ -420,12 +434,17 @@ void ccs__FacePoints_Scatter(cc_Subd *subd, int32_t depth)
     const int32_t stride = ccs_CumulativeVertexCountAtDepth(cage, depth);
     cc_VertexPoint *newFacePoints = &subd->vertexPoints[stride + vertexCount];
 
-    ccs__FacePoints_Scatter<<<EACH_ELEM(halfedgeCount)>>>(subd, depth, cage, halfedgeCount, vertexCount, stride, newFacePoints);
+    // #pragma omp for
+    // for(int i = 0; i < NUM_GPUS; i++){
+        // cudaSetDevice(i);
+        ccs__FacePoints_Scatter<<<EACH_ELEM(halfedgeCount)>>>(subd, depth, cage, halfedgeCount, vertexCount, stride, newFacePoints);
+    // }
 }
 
 __global__ void ccs__CreasedEdgePoints_Scatter(const cc_Subd *subd, int32_t depth, const cc_Mesh *cage, int32_t halfedgeCount, int32_t faceCount, int32_t vertexCount, const cc_VertexPoint *newFacePoints, cc_VertexPoint *newEdgePoints)
 {
     CHECK_TID(halfedgeCount)
+    // CHECK_ASSIGN_TID(halfedgeID, halfedgeCount)
     int32_t halfedgeID = TID;
     const int32_t twinID = ccs_HalfedgeTwinID(subd, halfedgeID, depth);
     const int32_t edgeID = ccs_HalfedgeEdgeID(subd, halfedgeID, depth);
@@ -472,12 +491,18 @@ void ccs__CreasedEdgePoints_Scatter(cc_Subd *subd, int32_t depth)
     const int32_t stride = ccs_CumulativeVertexCountAtDepth(cage, depth);
     const cc_VertexPoint *newFacePoints = &subd->vertexPoints[stride + vertexCount];
     cc_VertexPoint *newEdgePoints = &subd->vertexPoints[stride + vertexCount + faceCount];
-    ccs__CreasedEdgePoints_Scatter<<<EACH_ELEM(halfedgeCount)>>>(subd, depth, cage, halfedgeCount, faceCount, vertexCount, newFacePoints, newEdgePoints);
+
+    // #pragma omp for
+    // for(int i = 0; i < NUM_GPUS; i++){
+        // cudaSetDevice(i);
+        ccs__CreasedEdgePoints_Scatter<<<EACH_ELEM(halfedgeCount)>>>(subd, depth, cage, halfedgeCount, faceCount, vertexCount, newFacePoints, newEdgePoints);
+    // }
 }
 
 __global__ void ccs__CreasedVertexPoints_Scatter(cc_Subd *subd, int32_t depth, const cc_Mesh *cage, int32_t halfedgeCount, int32_t faceCount, int32_t vertexCount, const cc_VertexPoint *newFacePoints, const cc_VertexPoint *newEdgePoints, cc_VertexPoint *newVertexPoints)
 {   
     CHECK_TID(halfedgeCount)
+    // CHECK_ASSIGN_TID(halfedgeID, halfedgeCount)
     int32_t halfedgeID = TID;
     const int32_t vertexID = ccs_HalfedgeVertexID(subd, halfedgeID, depth);
     const int32_t edgeID = ccs_HalfedgeEdgeID(subd, halfedgeID, depth);
@@ -599,7 +624,11 @@ void ccs__CreasedVertexPoints_Scatter(cc_Subd *subd, int32_t depth)
     const cc_VertexPoint *newEdgePoints = &subd->vertexPoints[stride + vertexCount + faceCount];
     cc_VertexPoint *newVertexPoints = &subd->vertexPoints[stride];
     
-    ccs__CreasedVertexPoints_Scatter<<<EACH_ELEM(halfedgeCount)>>>(subd, depth, cage, halfedgeCount, faceCount, vertexCount, newFacePoints, newEdgePoints, newVertexPoints);
+    // #pragma omp for
+    // for(int i = 0; i < NUM_GPUS; i++){
+        // cudaSetDevice(i);
+        ccs__CreasedVertexPoints_Scatter<<<EACH_ELEM(halfedgeCount)>>>(subd, depth, cage, halfedgeCount, faceCount, vertexCount, newFacePoints, newEdgePoints, newVertexPoints);
+    // }
 }
 
 
@@ -610,6 +639,8 @@ void ccs_RefineVertexPoints_Scatter(cc_Subd *subd)
     ccs__CreasedCageEdgePoints_Scatter(subd);
     ccs__CreasedCageVertexPoints_Scatter(subd);
     cudaDeviceSynchronize();
+
+    
 
     for (int32_t depth = 1; depth < ccs_MaxDepth(subd); ++depth) {
         ccs__FacePoints_Scatter(subd, depth);
@@ -625,8 +656,9 @@ Start Creases Code
 **************/
 
 __global__ void ccs__RefineCageCreases_Inner(const cc_Mesh *cage, int32_t edgeCount, cc_Crease *creasesOut){
-    CHECK_TID(edgeCount)
-    int32_t edgeID = TID;
+    // CHECK_TID(edgeCount)
+    // int32_t edgeID = TID;
+    CHECK_ASSIGN_TID(edgeID, edgeCount)
 
     const int32_t nextID = ccm_CreaseNextID(cage, edgeID);
     const int32_t prevID = ccm_CreasePrevID(cage, edgeID);
@@ -658,13 +690,19 @@ void ccs__RefineCageCreases(cc_Subd *subd)
     const cc_Mesh *cage = subd->cage;
     const int32_t edgeCount = ccm_EdgeCount(cage);
     cc_Crease *creasesOut = subd->creases;
-    ccs__RefineCageCreases_Inner<<<EACH_ELEM(edgeCount)>>>(cage, edgeCount, creasesOut);
+
+    #pragma omp for
+    for(int i = 0; i < NUM_GPUS; i++){
+        cudaSetDevice(i);
+        ccs__RefineCageCreases_Inner<<<EACH_ELEM_GPU(edgeCount)>>>(cage, edgeCount, creasesOut);
+    }
 }
 
 __global__ void ccs__RefineCreases(cc_Subd *subd, int32_t depth, const cc_Mesh *cage, int32_t creaseCount, int32_t stride, cc_Crease *creasesOut)
 {
-    CHECK_TID(creaseCount)
-    int32_t edgeID = TID;
+    // CHECK_TID(creaseCount)
+    CHECK_ASSIGN_TID(edgeID, creaseCount)
+    // int32_t edgeID = TID;
     const int32_t nextID = ccs_CreaseNextID_Fast(subd, edgeID, depth);
     const int32_t prevID = ccs_CreasePrevID_Fast(subd, edgeID, depth);
     const bool t1 = ccs_CreasePrevID_Fast(subd, nextID, depth) == edgeID && nextID != edgeID;
@@ -702,7 +740,11 @@ void ccs__RefineCreases(cc_Subd *subd, int32_t depth)
     const int32_t creaseCount = ccm_CreaseCountAtDepth(cage, depth);
     const int32_t stride = ccs_CumulativeCreaseCountAtDepth(cage, depth);
     cc_Crease *creasesOut = &subd->creases[stride];
-    ccs__RefineCreases<<<EACH_ELEM(creaseCount)>>>(subd, depth, cage, creaseCount, stride, creasesOut);
+    #pragma omp parallel for
+    for(int i = 0; i < NUM_GPUS; i++){
+        cudaSetDevice(i);
+        ccs__RefineCreases<<<EACH_ELEM_GPU(creaseCount)>>>(subd, depth, cage, creaseCount, stride, creasesOut);
+    }
 }
 
 void ccs_RefineCreases(cc_Subd *subd)
