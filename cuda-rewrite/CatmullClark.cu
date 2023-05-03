@@ -6,9 +6,29 @@
 #include "CatmullClark.h"
 
 #define NUM_THREADS 256
+#define NUM_THREADS_PER_GPU 256
+#define NUM_GPUS 1
+#define NUM_ELEMS_PER_GPU(num_elems) (num_elems + NUM_GPUS - 1) / NUM_GPUS
+#define EACH_ELEM_GPU(num_elems) (NUM_ELEMS_PER_GPU(num_elems) + NUM_THREADS_PER_GPU - 1) / NUM_THREADS, NUM_THREADS_PER_GPU
+#define NEW_TID(device, num_elems) (threadIdx.x + blockIdx.x * blockDim.x + (NUM_ELEMS_PER_GPU(num_elems) * device))
 #define TID (threadIdx.x + blockIdx.x * blockDim.x)
 #define CHECK_TID(count) if (TID >= count) return;
+#define CHECK_NEW_TID(id,count) if (id > count) return;
 #define EACH_ELEM(num_elems) (num_elems + NUM_THREADS - 1) / NUM_THREADS, NUM_THREADS
+#define GET_DEVICE(var_name)\
+    int var_name;\
+    cudaGetDevice(&var_name);
+
+#define CHECK_ASSIGN_TID(id, num_elems)\
+    GET_DEVICE(device_num);\
+    int32_t id = NEW_TID(device_num, num_elems);\
+    CHECK_NEW_TID(id,num_elems)
+
+// __host__ __device__ int32_t getNewTID(int32_t num_elems){
+//     int device_num;
+//     cudaGetDevice(&device_num);
+//     return (threadIdx.x + blockIdx.x * blockDim.x + (NUM_ELEMS_PER_GPU(num_elems) * device_num));
+// }
 
 /*******************************************************************************
  * RefineCageHalfedges -- Applies halfedge refinement rules on the cage mesh
@@ -18,8 +38,8 @@
  *
  */
 __global__ void RefineCageInner(const cc_Mesh *cage, int32_t vertexCount, int32_t edgeCount, int32_t faceCount, int32_t halfedgeCount, cc_Halfedge_SemiRegular *halfedgesOut){
-    CHECK_TID(halfedgeCount)
-    int32_t halfedgeID = TID;
+    CHECK_ASSIGN_TID(halfedgeID, halfedgeCount)
+    
     const int32_t twinID = ccm_HalfedgeTwinID(cage, halfedgeID);
     const int32_t prevID = ccm_HalfedgePrevID(cage, halfedgeID);
     const int32_t nextID = ccm_HalfedgeNextID(cage, halfedgeID);
@@ -66,12 +86,16 @@ void ccs__RefineCageHalfedges(cc_Subd *subd)
     const int32_t halfedgeCount = ccm_HalfedgeCount(cage);
     cc_Halfedge_SemiRegular *halfedgesOut = subd->halfedges;
 
-    RefineCageInner<<<EACH_ELEM(halfedgeCount)>>>(cage, vertexCount, edgeCount, faceCount, halfedgeCount, halfedgesOut);
+    #pragma omp for
+    for(int i = 0; i < NUM_GPUS; i++){
+        cudaSetDevice(i);
+        RefineCageInner<<<EACH_ELEM_GPU(halfedgeCount)>>>(cage, vertexCount, edgeCount, faceCount, halfedgeCount, halfedgesOut);
+    }
+    
 }
 
 __global__ void RefineInnerHalfedges(cc_Subd *subd, int32_t depth, const cc_Mesh *cage, int32_t halfedgeCount, int32_t vertexCount, int32_t edgeCount, int32_t faceCount, int32_t stride, cc_Halfedge_SemiRegular *halfedgesOut){
-    CHECK_TID(halfedgeCount)
-    int32_t halfedgeID = TID;
+    CHECK_ASSIGN_TID(halfedgeID, halfedgeCount)
     const int32_t twinID = ccs_HalfedgeTwinID(subd, halfedgeID, depth);
     const int32_t prevID = ccm_HalfedgePrevID_Quad(halfedgeID);
     const int32_t nextID = ccm_HalfedgeNextID_Quad(halfedgeID);
@@ -123,7 +147,13 @@ static void ccs__RefineHalfedges(cc_Subd *subd, int32_t depth)
     const int32_t faceCount = ccm_FaceCountAtDepth_Fast(cage, depth);
     const int32_t stride = ccs_CumulativeHalfedgeCountAtDepth(cage, depth);
     cc_Halfedge_SemiRegular *halfedgesOut = &subd->halfedges[stride];
-    RefineInnerHalfedges<<<EACH_ELEM(halfedgeCount)>>>(subd, depth, cage, halfedgeCount, vertexCount, edgeCount, faceCount, stride, halfedgesOut);
+
+    #pragma omp for
+    for(int i = 0; i < NUM_GPUS; i++){
+        cudaSetDevice(i);
+        RefineInnerHalfedges<<<EACH_ELEM(halfedgeCount)>>>(subd, depth, cage, halfedgeCount, vertexCount, edgeCount, faceCount, stride, halfedgesOut);
+    }
+   
 }
 
 
