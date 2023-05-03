@@ -86,7 +86,7 @@ void ccs__RefineCageHalfedges(cc_Subd *subd)
     const int32_t halfedgeCount = ccm_HalfedgeCount(cage);
     cc_Halfedge_SemiRegular *halfedgesOut = subd->halfedges;
 
-    #pragma omp for
+    #pragma omp parallel for
     for(int i = 0; i < NUM_GPUS; i++){
         cudaSetDevice(i);
         RefineCageInner<<<EACH_ELEM_GPU(halfedgeCount)>>>(cage, vertexCount, edgeCount, faceCount, halfedgeCount, halfedgesOut);
@@ -148,7 +148,7 @@ static void ccs__RefineHalfedges(cc_Subd *subd, int32_t depth)
     const int32_t stride = ccs_CumulativeHalfedgeCountAtDepth(cage, depth);
     cc_Halfedge_SemiRegular *halfedgesOut = &subd->halfedges[stride];
 
-    #pragma omp for
+    #pragma omp parallel for
     for(int i = 0; i < NUM_GPUS; i++){
         cudaSetDevice(i);
         RefineInnerHalfedges<<<EACH_ELEM_GPU(halfedgeCount)>>>(subd, depth, cage, halfedgeCount, vertexCount, edgeCount, faceCount, stride, halfedgesOut);
@@ -190,8 +190,9 @@ void ccs__ClearVertexPoints(cc_Subd *subd)
 __global__ void ccs__CageFacePoints_Scatter_Inner(const cc_Mesh *cage, int32_t vertexCount, int32_t halfedgeCount, cc_VertexPoint *newFacePoints)
 {
     CHECK_TID(halfedgeCount)
-    // CHECK_ASSIGN_TID(halfedgeID, halfedgeCount)
     int32_t halfedgeID = TID;
+    // CHECK_ASSIGN_TID(halfedgeID, halfedgeCount)
+    
     const cc_VertexPoint vertexPoint = ccm_HalfedgeVertexPoint(cage, halfedgeID);
     const int32_t faceID = ccm_HalfedgeFaceID(cage, halfedgeID);
     double faceVertexCount = 1.0f;
@@ -217,13 +218,11 @@ void ccs__CageFacePoints_Scatter(cc_Subd *subd)
     const int32_t halfedgeCount = ccm_HalfedgeCount(cage);
     cc_VertexPoint *newFacePoints = &subd->vertexPoints[vertexCount];
 
-    // #pragma omp for
+    // #pragma omp parallel for
     // for(int i = 0; i < NUM_GPUS; i++){
         // cudaSetDevice(i);
         ccs__CageFacePoints_Scatter_Inner<<<EACH_ELEM(halfedgeCount)>>>(cage, vertexCount, halfedgeCount, newFacePoints);
     // }
-    
-
 }
 
 __global__ void ccs__CreasedCageEdgePoints_Scatter_Inner(const cc_Mesh *cage, int32_t faceCount, int32_t vertexCount, int32_t halfedgeCount, const cc_VertexPoint *newFacePoints, cc_VertexPoint *newEdgePoints)
@@ -691,7 +690,7 @@ void ccs__RefineCageCreases(cc_Subd *subd)
     const int32_t edgeCount = ccm_EdgeCount(cage);
     cc_Crease *creasesOut = subd->creases;
 
-    #pragma omp for
+    #pragma omp parallel for
     for(int i = 0; i < NUM_GPUS; i++){
         cudaSetDevice(i);
         ccs__RefineCageCreases_Inner<<<EACH_ELEM_GPU(edgeCount)>>>(cage, edgeCount, creasesOut);
@@ -752,8 +751,10 @@ void ccs_RefineCreases(cc_Subd *subd)
     const int32_t maxDepth = ccs_MaxDepth(subd);
 
     ccs__RefineCageCreases(subd);
+    cudaDeviceSynchronize();
 
     for (int32_t depth = 1; depth < maxDepth; ++depth) {
         ccs__RefineCreases(subd, depth);
+        cudaDeviceSynchronize();
     }
 }
