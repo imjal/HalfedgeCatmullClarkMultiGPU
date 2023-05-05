@@ -3,6 +3,7 @@
 #include <time.h>
 #include <omp.h>
 #include <cuda.h>
+#include <unistd.h>
 
 #define LOG(fmt, ...) fprintf(stdout, fmt "\n", ##__VA_ARGS__); fflush(stdout);
 
@@ -168,7 +169,7 @@ BenchStats Bench(void (*SubdCallback)(cc_Subd *subd), cc_Subd *subd)
     stats.median = times[runCount / 2];
     stats.mean = timesTotal / runCount;
 
-    free(times);
+    // free(times);
 
     return stats;
 }
@@ -210,6 +211,7 @@ int main(int argc, char **argv)
 
         return -1;
     }
+    // sleep(10);
 
     LOG("Refining... I have changed the code");
     {

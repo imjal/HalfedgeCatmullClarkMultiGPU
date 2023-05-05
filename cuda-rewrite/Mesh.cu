@@ -427,13 +427,13 @@ ccm_Create(
  */
  void ccm_Release(cc_Mesh *mesh)
 {
-    // cudaFree(mesh->vertexToHalfedgeIDs);
-    // cudaFree(mesh->faceToHalfedgeIDs);
-    // cudaFree(mesh->edgeToHalfedgeIDs);
-    // cudaFree(mesh->halfedges);
-    // cudaFree(mesh->creases);
-    // cudaFree(mesh->vertexPoints);
-    // cudaFree(mesh->uvs);
+    cudaFree(mesh->vertexToHalfedgeIDs);
+    cudaFree(mesh->faceToHalfedgeIDs);
+    cudaFree(mesh->edgeToHalfedgeIDs);
+    cudaFree(mesh->halfedges);
+    cudaFree(mesh->creases);
+    cudaFree(mesh->vertexPoints);
+    cudaFree(mesh->uvs);
     cudaFree(mesh);
 }
 
@@ -537,42 +537,42 @@ bool ccm__ReadData(cc_Mesh *mesh, FILE *stream)
     const int32_t uvByteCount = uvCount * sizeof(cc_VertexUv_f);
     const int32_t creaseByteCount = edgeCount * sizeof(cc_Crease_f);
 
-    cc_Crease_f *creases = (cc_Crease_f *)malloc(creaseByteCount);
-    cc_VertexPoint_f *vertexPts = (cc_VertexPoint_f *)malloc(vertexByteCount);
-    cc_VertexUv_f *uvs = (cc_VertexUv_f *)malloc(uvByteCount);
+    cc_Crease_f *creases1 = (cc_Crease_f *)malloc(creaseByteCount);
+    cc_VertexPoint_f *vertexPts1 = (cc_VertexPoint_f *)malloc(vertexByteCount);
+    cc_VertexUv_f *uvs1 = (cc_VertexUv_f *)malloc(uvByteCount);
 
     bool isSuccess = 
        (fread(mesh->vertexToHalfedgeIDs , sizeof(int32_t)       , vertexCount  , stream) == (size_t)vertexCount)
     && (fread(mesh->edgeToHalfedgeIDs   , sizeof(int32_t)       , edgeCount    , stream) == (size_t)edgeCount)
     && (fread(mesh->faceToHalfedgeIDs   , sizeof(int32_t)       , faceCount    , stream) == (size_t)faceCount)
-    && (fread(vertexPts                 , sizeof(cc_VertexPoint_f), vertexCount  , stream) == (size_t)vertexCount)
-    && (fread(uvs                       , sizeof(cc_VertexUv_f)   , uvCount      , stream) == (size_t)uvCount)
-    && (fread(creases                   , sizeof(cc_Crease_f)     , creaseCount  , stream) == (size_t)creaseCount)
+    && (fread(vertexPts1                 , sizeof(cc_VertexPoint_f), vertexCount  , stream) == (size_t)vertexCount)
+    && (fread(uvs1                       , sizeof(cc_VertexUv_f)   , uvCount      , stream) == (size_t)uvCount)
+    && (fread(creases1                   , sizeof(cc_Crease_f)     , creaseCount  , stream) == (size_t)creaseCount)
     && (fread(mesh->halfedges           , sizeof(cc_Halfedge)   , halfedgeCount, stream) == (size_t)halfedgeCount);
 
     // now convert all floats to doubles
     for(int i = 0; i < vertexCount; i++){
-        cc_VertexPoint_f tmp = vertexPts[i];
+        cc_VertexPoint_f tmp = vertexPts1[i];
         mesh->vertexPoints[i].x = (double) tmp.x;
         mesh->vertexPoints[i].y = (double) tmp.y;
         mesh->vertexPoints[i].z = (double) tmp.z;
     }
 
     for(int i = 0; i < uvCount; i++){
-        cc_VertexUv_f tmp = uvs[i];
+        cc_VertexUv_f tmp = uvs1[i];
         mesh->uvs[i].u = (double) tmp.u;
         mesh->uvs[i].v = (double) tmp.v;
     }
 
     for(int i = 0; i < creaseCount; i++){
-        cc_Crease_f tmp = creases[i];
+        cc_Crease_f tmp = creases1[i];
         mesh->creases[i].nextID = tmp.nextID;
         mesh->creases[i].prevID = tmp.prevID;
         mesh->creases[i].sharpness = (double) tmp.sharpness;
     }
-    free(creases); 
-    free(vertexPts);
-    free(uvs);
+    free(creases1); 
+    free(vertexPts1);
+    free(uvs1);
     return isSuccess;
 }
 
@@ -786,9 +786,9 @@ cc_Subd *ccs_Create(const cc_Mesh *cage, int32_t maxDepth)
  */
  void ccs_Release(cc_Subd *subd)
 {
-    // cudaFree(subd->halfedges);
-    // cudaFree(subd->creases);
-    // cudaFree(subd->vertexPoints);
+    cudaFree(subd->halfedges);
+    cudaFree(subd->creases);
+    cudaFree(subd->vertexPoints);
     cudaFree(subd);
 }
 

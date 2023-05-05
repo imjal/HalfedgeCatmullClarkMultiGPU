@@ -39,7 +39,6 @@
  */
 __global__ void RefineCageInner(const cc_Mesh *cage, int32_t vertexCount, int32_t edgeCount, int32_t faceCount, int32_t halfedgeCount, cc_Halfedge_SemiRegular *halfedgesOut){
     CHECK_ASSIGN_TID(halfedgeID, halfedgeCount)
-    
     const int32_t twinID = ccm_HalfedgeTwinID(cage, halfedgeID);
     const int32_t prevID = ccm_HalfedgePrevID(cage, halfedgeID);
     const int32_t nextID = ccm_HalfedgeNextID(cage, halfedgeID);
@@ -91,10 +90,15 @@ void ccs__RefineCageHalfedges(cc_Subd *subd)
         cudaSetDevice(i);
         RefineCageInner<<<EACH_ELEM_GPU(halfedgeCount)>>>(cage, vertexCount, edgeCount, faceCount, halfedgeCount, halfedgesOut);
     }
+
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) 
+        printf("Error: %s\n", cudaGetErrorString(err));
     
 }
 
 __global__ void RefineInnerHalfedges(cc_Subd *subd, int32_t depth, const cc_Mesh *cage, int32_t halfedgeCount, int32_t vertexCount, int32_t edgeCount, int32_t faceCount, int32_t stride, cc_Halfedge_SemiRegular *halfedgesOut){
+
     CHECK_ASSIGN_TID(halfedgeID, halfedgeCount)
     const int32_t twinID = ccs_HalfedgeTwinID(subd, halfedgeID, depth);
     const int32_t prevID = ccm_HalfedgePrevID_Quad(halfedgeID);
@@ -151,6 +155,7 @@ static void ccs__RefineHalfedges(cc_Subd *subd, int32_t depth)
     #pragma omp parallel for
     for(int i = 0; i < NUM_GPUS; i++){
         cudaSetDevice(i);
+        printf("It is using cuda!!\n");
         RefineInnerHalfedges<<<EACH_ELEM_GPU(halfedgeCount)>>>(subd, depth, cage, halfedgeCount, vertexCount, edgeCount, faceCount, stride, halfedgesOut);
     }
    
