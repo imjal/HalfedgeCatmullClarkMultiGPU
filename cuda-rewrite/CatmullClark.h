@@ -20,6 +20,8 @@ void ccs__RefineTopology(cc_Subd *subd);
  void ccs_RefineVertexPoints_NoCreases_Gather(cc_Subd *subd);
  void ccs_RefineVertexPoints_NoCreases_Scatter(cc_Subd *subd);
 
+ void touch_memory(cc_Subd *subd);
+
 #ifndef CC_MEMCPY
 #    include <string.h>
 #    define CC_MEMCPY(dest, src, count) memcpy(dest, src, count)

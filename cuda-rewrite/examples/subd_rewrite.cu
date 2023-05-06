@@ -213,7 +213,22 @@ int main(int argc, char **argv)
     }
     // sleep(10);
 
+    // touch memory so it is actually fetched
+    touch_memory(subd);
+
     LOG("Refining... I have changed the code");
+
+    {
+        const BenchStats stats = Bench(&touch_memory, subd);
+
+        LOG("Memory Fetching      -- median/mean/min/max (ms): %f / %f / %f / %f",
+            stats.median * 1e3,
+            stats.mean * 1e3,
+            stats.min * 1e3,
+            stats.max * 1e3);
+    }
+
+
     {
         const BenchStats stats = Bench(&ccs_RefineCreases, subd);
 
