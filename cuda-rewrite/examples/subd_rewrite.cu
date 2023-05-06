@@ -1,4 +1,6 @@
 #include <stdlib.h>
+#include <chrono>
+#include <iostream>
 #include <stdio.h>
 #include <time.h>
 #include <omp.h>
@@ -122,6 +124,57 @@ static int CompareCallback(const void * a, const void * b)
     }
 }
 
+BenchStats BenchMemory(void (*SubdCallback)(cc_Subd *subd, int32_t maxDepth), cc_Subd *subd, int32_t maxDepth)
+{
+#ifdef FLAG_BENCH
+    const int32_t runCount = 100;
+#else
+    const int32_t runCount = 1;
+#endif
+#ifdef _WIN32
+    DWORD startTime, stopTime;
+#else
+    struct timespec startTime, stopTime;
+#endif
+    double *times = (double *)malloc(sizeof(*times) * runCount);
+    double timesTotal = 0.0;
+    BenchStats stats = {0.0, 0.0, 0.0, 0.0};
+
+    for (int32_t runID = 0; runID < runCount; ++runID) {
+        double time = 0.0;
+
+#ifdef _WIN32
+        startTime = GetTickCount();
+#else
+        clock_gettime(CLOCK_MONOTONIC, &startTime);
+#endif
+        (*SubdCallback)(subd, maxDepth);
+        cudaDeviceSynchronize(); // remember this is here after every "big block" call
+#ifdef _WIN32
+        stopTime = GetTickCount();
+        time = (stopTime - startTime) / 1e3;
+#else
+        clock_gettime(CLOCK_MONOTONIC, &stopTime);
+
+        time = (stopTime.tv_sec - startTime.tv_sec);
+        time+= (stopTime.tv_nsec - startTime.tv_nsec) / 1000000000.0;
+#endif
+        times[runID] = time;
+        timesTotal+= time;
+    }
+
+    qsort(times, runCount, sizeof(times[0]), &CompareCallback);
+
+    stats.min = times[0];
+    stats.max = times[runCount - 1];
+    stats.median = times[runCount / 2];
+    stats.mean = timesTotal / runCount;
+
+    free(times);
+
+    return stats;
+}
+
 BenchStats Bench(void (*SubdCallback)(cc_Subd *subd), cc_Subd *subd)
 {
 #ifdef FLAG_BENCH
@@ -210,6 +263,27 @@ int main(int argc, char **argv)
 
         return -1;
     }
+    // auto start_time = std::chrono::steady_clock::now();
+    // touch_memory(subd, maxDepth);
+    // auto end_time = std::chrono::steady_clock::now();
+
+    // std::chrono::duration<double, std::milli> diff = end_time - start_time;
+    // double seconds = diff.count();
+
+    // // Finalize
+    // std::cout << "Moving Data Time " << seconds << "\n";
+
+    LOG("Refining... I have changed the code");
+    {
+        const BenchStats stats = BenchMemory(&touch_memory, subd, maxDepth);
+
+        LOG("Creases      -- median/mean/min/max (ms): %f / %f / %f / %f",
+            stats.median * 1e3,
+            stats.mean * 1e3,
+            stats.min * 1e3,
+            stats.max * 1e3);
+    }
+    
 
     LOG("Refining... I have changed the code");
     {
@@ -268,8 +342,8 @@ int main(int argc, char **argv)
 
     LOG("All done!");
 
-    // ccm_Release(cage);
-    // ccs_Release(subd);
+    ccm_Release(cage);
+    ccs_Release(subd);
 
     return 0;
 }
