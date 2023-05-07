@@ -13,8 +13,9 @@
 
 #define NUM_GPUS 4
 #define PER_GPU(num_elems) (num_elems + NUM_GPUS - 1)/NUM_GPUS
-#define NEW_TID(gpu_id, num_elems) (threadIdx.x + blockIdx.x * blockDim.x + gpu_id * PER_GPU(num_elems))
-#define EACH_ELEM_GPU(num_elems) (PER_GPU(num_elems) + NUM_THREADS - 1) / NUM_THREADS, NUM_THREADS
+#define NUM_BlOCKS_PER_GPU(num_elems) (PER_GPU(num_elems) + NUM_THREADS - 1) / NUM_THREADS
+#define NEW_TID(gpu_id, num_elems) (threadIdx.x + blockIdx.x * blockDim.x + (gpu_id * PER_GPU(num_elems)))
+#define EACH_ELEM_GPU(num_elems) NUM_BlOCKS_PER_GPU(num_elems), NUM_THREADS
 
 /*******************************************************************************
  * RefineCageHalfedges -- Applies halfedge refinement rules on the cage mesh
@@ -29,10 +30,10 @@ __global__ void RefineCageInner(const cc_Mesh *cage, int32_t vertexCount, int32_
     int device_num = 0;
     cudaGetDevice(&device_num);
     int32_t halfedgeID = NEW_TID(device_num, halfedgeCount);
-    // printf("deviceID %d, halfedgeID %d\n", device_num, halfedgeID);
-    if(halfedgeID >= halfedgeCount){
+    if(halfedgeID >= halfedgeCount || halfedgeID >= ((device_num + 1) * PER_GPU(halfedgeCount)) ){
         return;
     }
+    // printf("deviceID %d, halfedgeID %d\n", device_num, halfedgeID);
     const int32_t twinID = ccm_HalfedgeTwinID(cage, halfedgeID);
     const int32_t prevID = ccm_HalfedgePrevID(cage, halfedgeID);
     const int32_t nextID = ccm_HalfedgeNextID(cage, halfedgeID);
@@ -78,7 +79,8 @@ void ccs__RefineCageHalfedges(cc_Subd *subd)
     const int32_t faceCount = ccm_FaceCount(cage);
     const int32_t halfedgeCount = ccm_HalfedgeCount(cage);
     cc_Halfedge_SemiRegular *halfedgesOut = subd->halfedges;
-
+    printf("halfedgeCount %d\n", halfedgeCount);
+    printf("per gpu %d\n", PER_GPU(halfedgeCount)) ;
     for(int i = 0; i < NUM_GPUS; i++){
         cudaSetDevice(i);
         RefineCageInner<<<EACH_ELEM_GPU(halfedgeCount)>>>(cage, vertexCount, edgeCount, faceCount, halfedgeCount, halfedgesOut);
@@ -90,7 +92,7 @@ __global__ void RefineInnerHalfedges(cc_Subd *subd, int32_t depth, const cc_Mesh
     int device_num = 0;
     cudaGetDevice(&device_num);
     int32_t halfedgeID = NEW_TID(device_num, halfedgeCount);
-    if(halfedgeID >= halfedgeCount){
+    if(halfedgeID >= halfedgeCount || halfedgeID >= (device_num + 1) * PER_GPU(halfedgeCount)){
         return;
     }
     const int32_t twinID = ccs_HalfedgeTwinID(subd, halfedgeID, depth);
@@ -161,6 +163,7 @@ void ccs_RefineHalfedges(cc_Subd *subd)
     const int32_t maxDepth = ccs_MaxDepth(subd);
 
     ccs__RefineCageHalfedges(subd);
+    cudaDeviceSynchronize();
 
     for (int32_t depth = 1; depth < maxDepth; ++depth) {
         ccs__RefineHalfedges(subd, depth);
@@ -183,11 +186,17 @@ void ccs__ClearVertexPoints(cc_Subd *subd)
 
 __global__ void ccs__CageFacePoints_Scatter_Inner(const cc_Mesh *cage, int32_t vertexCount, int32_t halfedgeCount, cc_VertexPoint *newFacePoints)
 {
-    CHECK_TID(halfedgeCount)
-    int32_t halfedgeID = TID;
+    // CHECK_TID(halfedgeCount)
+    // int32_t halfedgeID = TID;
+    int device_num = 0;
+    cudaGetDevice(&device_num);
+    int32_t halfedgeID = NEW_TID(device_num, halfedgeCount);
+    if(halfedgeID >= halfedgeCount || halfedgeID >= (device_num + 1) * PER_GPU(halfedgeCount)){
+        return;
+    }
     const cc_VertexPoint vertexPoint = ccm_HalfedgeVertexPoint(cage, halfedgeID);
     const int32_t faceID = ccm_HalfedgeFaceID(cage, halfedgeID);
-    double faceVertexCount = 1.0f;
+    double faceVertexCount = 1.0;
     double *newFacePoint = newFacePoints[faceID].array;
 
     for (int32_t halfedgeIt = ccm_HalfedgeNextID(cage, halfedgeID);
@@ -199,19 +208,23 @@ __global__ void ccs__CageFacePoints_Scatter_Inner(const cc_Mesh *cage, int32_t v
     for (int32_t i = 0; i < 3; ++i) {
 // CC_ATOMIC
         // newFacePoint[i]+= vertexPoint.array[i] / (double)faceVertexCount;
-        atomicAdd(newFacePoint + i, vertexPoint.array[i] / (double)faceVertexCount);
+        atomicAdd_system(newFacePoint + i, vertexPoint.array[i] / (double)faceVertexCount);
     }
 }
+
 
 void ccs__CageFacePoints_Scatter(cc_Subd *subd)
 {
     const cc_Mesh *cage = subd->cage;
+    const int32_t faceCount = ccm_FaceCount(cage);
     const int32_t vertexCount = ccm_VertexCount(cage);
     const int32_t halfedgeCount = ccm_HalfedgeCount(cage);
     cc_VertexPoint *newFacePoints = &subd->vertexPoints[vertexCount];
-
-    ccs__CageFacePoints_Scatter_Inner<<<EACH_ELEM(halfedgeCount)>>>(cage, vertexCount, halfedgeCount, newFacePoints);
-
+    
+    for(int i = 0; i < NUM_GPUS; i++){
+        cudaSetDevice(i);
+        ccs__CageFacePoints_Scatter_Inner<<<EACH_ELEM(halfedgeCount)>>>(cage, vertexCount, halfedgeCount, newFacePoints);
+    }
 }
 
 __global__ void ccs__CreasedCageEdgePoints_Scatter_Inner(const cc_Mesh *cage, int32_t faceCount, int32_t vertexCount, int32_t halfedgeCount, const cc_VertexPoint *newFacePoints, cc_VertexPoint *newEdgePoints)
@@ -248,7 +261,7 @@ __global__ void ccs__CreasedCageEdgePoints_Scatter_Inner(const cc_Mesh *cage, in
                 edgeWeight);
 
     for (int32_t i = 0; i < 3; ++i) {
-        atomicAdd(newEdgePoints[edgeID].array + i, atomicWeight[i]);
+        atomicAdd_system(newEdgePoints[edgeID].array + i, atomicWeight[i]);
     }
 }
 
@@ -330,47 +343,47 @@ __global__ void ccs__CreasedCageVertexPoints_Scatter_Inner(
     }
 
     // corner point
-    cc__Mul3f(cornerPoint.array, oldPoint.array, 1.0f / valence);
+    cc__Mul3f(cornerPoint.array, oldPoint.array, 1.0 / valence);
 
     // crease computation: V / 4
-    cc__Mul3f(tmp1, oldPoint.array, 0.25f * creaseWeight);
-    cc__Mul3f(tmp2, newEdgePoint.array, 0.25f * creaseWeight);
+    cc__Mul3f(tmp1, oldPoint.array, 0.25 * creaseWeight);
+    cc__Mul3f(tmp2, newEdgePoint.array, 0.25 * creaseWeight);
     cc__Add3f(creasePoint.array, tmp1, tmp2);
 
     // smooth computation: (4E - F + (n - 3) V) / N
-    cc__Mul3f(tmp1, newFacePoint.array, -1.0f);
-    cc__Mul3f(tmp2, newEdgePoint.array, +4.0f);
+    cc__Mul3f(tmp1, newFacePoint.array, -1.0);
+    cc__Mul3f(tmp2, newEdgePoint.array, +4.0);
     cc__Add3f(smoothPoint.array, tmp1, tmp2);
-    cc__Mul3f(tmp1, oldPoint.array, valence - 3.0f);
+    cc__Mul3f(tmp1, oldPoint.array, valence - 3.0);
     cc__Add3f(smoothPoint.array, smoothPoint.array, tmp1);
     cc__Mul3f(smoothPoint.array,
                 smoothPoint.array,
-                1.0f / (valence * valence));
+                1.0 / (valence * valence));
 
     // boundary corrections
     if (forwardIterator < 0) {
         creaseCount+= creaseWeight;
         ++valence;
 
-        cc__Mul3f(tmp1, oldPoint.array, 0.25f * prevCreaseWeight);
-        cc__Mul3f(tmp2, newPrevEdgePoint.array, 0.25f * prevCreaseWeight);
+        cc__Mul3f(tmp1, oldPoint.array, 0.25 * prevCreaseWeight);
+        cc__Mul3f(tmp2, newPrevEdgePoint.array, 0.25 * prevCreaseWeight);
         cc__Add3f(tmp1, tmp1, tmp2);
         cc__Add3f(creasePoint.array, creasePoint.array, tmp1);
     }
 
     // atomicWeight (TODO: make branchless ?)
-    if (creaseCount <= 1.0f) {
+    if (creaseCount <= 1.0) {
         atomicWeight = smoothPoint;
-    } else if (creaseCount >= 3.0f || valence == 2.0f) {
+    } else if (creaseCount >= 3.0 || valence == 2.0) {
         atomicWeight = cornerPoint;
     } else {
         cc__Lerp3f(atomicWeight.array,
                     cornerPoint.array,
                     creasePoint.array,
-                    cc__Satf(avgS * 0.5f));
+                    cc__Satf(avgS * 0.5));
     }
     for (int32_t i = 0; i < 3; ++i) {
-        atomicAdd(newVertexPoints[vertexID].array + i, atomicWeight.array[i]);
+        atomicAdd_system(newVertexPoints[vertexID].array + i, atomicWeight.array[i]);
         // newVertexPoints[vertexID].array[i]+= atomicWeight.array[i];
     }
 }
@@ -401,7 +414,7 @@ __global__ void ccs__FacePoints_Scatter(const cc_Subd *subd, int32_t depth, cons
 
     for (int32_t i = 0; i < 3; ++i) {
         // newFacePoint[i]+= vertexPoint.array[i] / (double)4.0f;
-        atomicAdd(newFacePoint + i, vertexPoint.array[i] / (double)4.0f);
+        atomicAdd_system(newFacePoint + i, vertexPoint.array[i] / (double)4.0);
     }
 }
 
@@ -432,17 +445,17 @@ __global__ void ccs__CreasedEdgePoints_Scatter(const cc_Subd *subd, int32_t dept
         ccs_HalfedgeVertexPoint(subd, halfedgeID, depth),
         ccs_HalfedgeVertexPoint(subd,     nextID, depth)
     };
-    cc_VertexPoint smoothPoint = {0.0f, 0.0f, 0.0f};
-    cc_VertexPoint sharpPoint = {0.0f, 0.0f, 0.0f};
+    cc_VertexPoint smoothPoint = {0.0, 0.0, 0.0};
+    cc_VertexPoint sharpPoint = {0.0, 0.0, 0.0};
     double tmp[3], atomicWeight[3];
 
     // sharp point
-    cc__Lerp3f(tmp, oldEdgePoints[0].array, oldEdgePoints[1].array, 0.5f);
-    cc__Mul3f(sharpPoint.array, tmp, twinID < 0 ? 1.0f : 0.5f);
+    cc__Lerp3f(tmp, oldEdgePoints[0].array, oldEdgePoints[1].array, 0.5);
+    cc__Mul3f(sharpPoint.array, tmp, twinID < 0 ? 1.0 : 0.5);
 
     // smooth point
-    cc__Lerp3f(tmp, oldEdgePoints[0].array, newFacePoint.array, 0.5f);
-    cc__Mul3f(smoothPoint.array, tmp, 0.5f);
+    cc__Lerp3f(tmp, oldEdgePoints[0].array, newFacePoint.array, 0.5);
+    cc__Mul3f(smoothPoint.array, tmp, 0.5);
 
     // atomic weight
     cc__Lerp3f(atomicWeight,
@@ -453,7 +466,7 @@ __global__ void ccs__CreasedEdgePoints_Scatter(const cc_Subd *subd, int32_t dept
     for (int32_t i = 0; i < 3; ++i) {
 // CC_ATOMIC
 //         newEdgePoints[edgeID].array[i]+= atomicWeight[i];
-        atomicAdd(newEdgePoints[edgeID].array + i, atomicWeight[i]);
+        atomicAdd_system(newEdgePoints[edgeID].array + i, atomicWeight[i]);
     }
 }
 
@@ -577,7 +590,7 @@ __global__ void ccs__CreasedVertexPoints_Scatter(cc_Subd *subd, int32_t depth, c
     for (int32_t i = 0; i < 3; ++i) {
 // CC_ATOMIC
         // newVertexPoints[vertexID].array[i]+= atomicWeight.array[i];
-        atomicAdd(newVertexPoints[vertexID].array + i, atomicWeight.array[i]);
+        atomicAdd_system(newVertexPoints[vertexID].array + i, atomicWeight.array[i]);
     }
 }
 
@@ -601,6 +614,7 @@ void ccs_RefineVertexPoints_Scatter(cc_Subd *subd)
 {
     ccs__ClearVertexPoints(subd);
     ccs__CageFacePoints_Scatter(subd);
+    cudaDeviceSynchronize();
     ccs__CreasedCageEdgePoints_Scatter(subd);
     ccs__CreasedCageVertexPoints_Scatter(subd);
     cudaDeviceSynchronize();
@@ -727,6 +741,7 @@ void ccs_RefineCreases(cc_Subd *subd)
     const int32_t maxDepth = ccs_MaxDepth(subd);
 
     ccs__RefineCageCreases(subd);
+    cudaDeviceSynchronize();
 
     for (int32_t depth = 1; depth < maxDepth; ++depth) {
         ccs__RefineCreases(subd, depth);
@@ -765,5 +780,5 @@ void touch_memory(cc_Subd *subd, int32_t maxDepth)
         cudaSetDevice(i);
         touch_memory_inner<<<EACH_ELEM_GPU(creaseCount)>>>(subd, maxDepth);
     }
-    cudaDeviceSynchronize();
+    // cudaDeviceSynchronize();
 }

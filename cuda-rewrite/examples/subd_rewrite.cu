@@ -226,8 +226,30 @@ BenchStats Bench(void (*SubdCallback)(cc_Subd *subd), cc_Subd *subd)
     return stats;
 }
 
+__global__ void mykernel(int *addr) {
+    if(threadIdx.x > 1) return;
+    int* intadd = addr + 11;
+    atomicAdd_system(intadd, 10);       // only available on devices with compute capability 6.x
+}
+
+void foo() {
+    int *addr;
+    cudaMallocManaged(&addr, 4 * 12);
+    *addr = 0;
+
+    for(int i = 0; i < 4; i++){
+        cudaSetDevice(i);
+        mykernel<<<1, 1>>>(addr);
+    }
+    cudaDeviceSynchronize();
+    printf("addr 1 %d\n", *(addr + 11));
+    // __sync_fetch_and_add(addr, 10);  // CPU atomic operation
+}
+
 int main(int argc, char **argv)
 {
+    // foo(); 
+    // return;
     const char *filename = "./Kitchen_PUP.ccm";
     int32_t maxDepth = 4;
 #ifdef FLAG_BENCH
@@ -263,6 +285,17 @@ int main(int argc, char **argv)
 
         return -1;
     }
+
+    // int nDevices;
+
+    // cudaGetDeviceCount(&nDevices);
+    // for (int i = 0; i < nDevices; i++) {
+    //     cudaDeviceProp prop;
+    //     cudaGetDeviceProperties(&prop, i);
+    //     printf("Device Number: %d\n", i);
+    //     printf("  Managed Access? %d\n", prop.concurrentManagedAccess);
+    // }
+    // return;
     // auto start_time = std::chrono::steady_clock::now();
     // touch_memory(subd, maxDepth);
     // auto end_time = std::chrono::steady_clock::now();
