@@ -268,8 +268,8 @@ int main(int argc, char **argv)
 
     LOG("All done!");
 
-    // ccm_Release(cage);
-    // ccs_Release(subd);
+    ccm_Release(cage);
+    ccs_Release(subd);
 
     return 0;
 }

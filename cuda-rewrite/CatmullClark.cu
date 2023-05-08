@@ -10,6 +10,11 @@
 #define CHECK_TID(count) if (TID >= count) return;
 #define EACH_ELEM(num_elems) (num_elems + NUM_THREADS - 1) / NUM_THREADS, NUM_THREADS
 
+#define NUM_GPUS 1
+#define PER_GPU(num_elems) (num_elems + NUM_GPUS - 1)/NUM_GPUS	
+#define NEW_TID(gpu_id, num_elems) (threadIdx.x + blockIdx.x * blockDim.x + gpu_id * PER_GPU(num_elems))	
+#define EACH_ELEM_GPU(num_elems) (PER_GPU(num_elems) + NUM_THREADS - 1) / NUM_THREADS, NUM_THREADS
+
 /*******************************************************************************
  * RefineCageHalfedges -- Applies halfedge refinement rules on the cage mesh
  *
@@ -17,9 +22,14 @@
  * step and stores them in the subd.
  *
  */
-__global__ void RefineCageInner(const cc_Mesh *cage, int32_t vertexCount, int32_t edgeCount, int32_t faceCount, int32_t halfedgeCount, cc_Halfedge_SemiRegular *halfedgesOut){
-    CHECK_TID(halfedgeCount)
-    int32_t halfedgeID = TID;
+__global__ void RefineCageInner(const cc_Mesh *cage, int device_num, int32_t vertexCount, int32_t edgeCount, int32_t faceCount, int32_t halfedgeCount, cc_Halfedge_SemiRegular *halfedgesOut){
+    // CHECK_TID(halfedgeCount)
+    // int32_t halfedgeIDold = TID;
+
+    int32_t halfedgeID = NEW_TID(device_num, halfedgeCount);
+    if(halfedgeID >= halfedgeCount || halfedgeID >= ((device_num + 1) * PER_GPU(halfedgeCount)) ){	
+        return;	
+    }
     const int32_t twinID = ccm_HalfedgeTwinID(cage, halfedgeID);
     const int32_t prevID = ccm_HalfedgePrevID(cage, halfedgeID);
     const int32_t nextID = ccm_HalfedgeNextID(cage, halfedgeID);
@@ -66,12 +76,22 @@ void ccs__RefineCageHalfedges(cc_Subd *subd)
     const int32_t halfedgeCount = ccm_HalfedgeCount(cage);
     cc_Halfedge_SemiRegular *halfedgesOut = subd->halfedges;
 
-    RefineCageInner<<<EACH_ELEM(halfedgeCount)>>>(cage, vertexCount, edgeCount, faceCount, halfedgeCount, halfedgesOut);
+    for(int i = 0; i < NUM_GPUS; i++){
+        cudaSetDevice(i); 
+        RefineCageInner<<<EACH_ELEM_GPU(halfedgeCount)>>>(cage, i, vertexCount, edgeCount, faceCount, halfedgeCount, halfedgesOut);
+    }
+    
 }
 
-__global__ void RefineInnerHalfedges(cc_Subd *subd, int32_t depth, const cc_Mesh *cage, int32_t halfedgeCount, int32_t vertexCount, int32_t edgeCount, int32_t faceCount, int32_t stride, cc_Halfedge_SemiRegular *halfedgesOut){
-    CHECK_TID(halfedgeCount)
-    int32_t halfedgeID = TID;
+__global__ void RefineInnerHalfedges(cc_Subd *subd, int32_t depth, int device_num, const cc_Mesh *cage, int32_t halfedgeCount, int32_t vertexCount, int32_t edgeCount, int32_t faceCount, int32_t stride, cc_Halfedge_SemiRegular *halfedgesOut){
+    // CHECK_TID(halfedgeCount)
+    // int32_t halfedgeIDold = TID;
+
+    int32_t halfedgeID = NEW_TID(device_num, halfedgeCount);
+    if(halfedgeID >= halfedgeCount || halfedgeID >= ((device_num + 1) * PER_GPU(halfedgeCount)) ){	
+        return;	
+    }
+
     const int32_t twinID = ccs_HalfedgeTwinID(subd, halfedgeID, depth);
     const int32_t prevID = ccm_HalfedgePrevID_Quad(halfedgeID);
     const int32_t nextID = ccm_HalfedgeNextID_Quad(halfedgeID);
@@ -123,7 +143,11 @@ static void ccs__RefineHalfedges(cc_Subd *subd, int32_t depth)
     const int32_t faceCount = ccm_FaceCountAtDepth_Fast(cage, depth);
     const int32_t stride = ccs_CumulativeHalfedgeCountAtDepth(cage, depth);
     cc_Halfedge_SemiRegular *halfedgesOut = &subd->halfedges[stride];
-    RefineInnerHalfedges<<<EACH_ELEM(halfedgeCount)>>>(subd, depth, cage, halfedgeCount, vertexCount, edgeCount, faceCount, stride, halfedgesOut);
+
+    for(int i = 0; i < NUM_GPUS; i++){
+        cudaSetDevice(i); 
+        RefineInnerHalfedges<<<EACH_ELEM_GPU(halfedgeCount)>>>(subd, depth, i, cage, halfedgeCount, vertexCount, edgeCount, faceCount, stride, halfedgesOut);
+    }
 }
 
 
@@ -133,10 +157,10 @@ static void ccs__RefineHalfedges(cc_Subd *subd, int32_t depth)
  */
 void ccs_RefineHalfedges(cc_Subd *subd)
 {
-    printf("Code has changed to Global Call\n");
     const int32_t maxDepth = ccs_MaxDepth(subd);
 
     ccs__RefineCageHalfedges(subd);
+    cudaDeviceSynchronize();
 
     for (int32_t depth = 1; depth < maxDepth; ++depth) {
         ccs__RefineHalfedges(subd, depth);
@@ -594,9 +618,14 @@ Start Creases Code
 
 **************/
 
-__global__ void ccs__RefineCageCreases_Inner(const cc_Mesh *cage, int32_t edgeCount, cc_Crease *creasesOut){
-    CHECK_TID(edgeCount)
-    int32_t edgeID = TID;
+__global__ void ccs__RefineCageCreases_Inner(const cc_Mesh *cage, int device_num, int32_t edgeCount, cc_Crease *creasesOut){
+    // CHECK_TID(edgeCount)
+    // int32_t edgeID = TID;
+
+    int32_t edgeID = NEW_TID(device_num, edgeCount);
+    if(edgeID >= edgeCount  || edgeID >= ((device_num + 1) * PER_GPU(edgeCount))){
+        return;	
+    }
 
     const int32_t nextID = ccm_CreaseNextID(cage, edgeID);
     const int32_t prevID = ccm_CreasePrevID(cage, edgeID);
@@ -628,13 +657,21 @@ void ccs__RefineCageCreases(cc_Subd *subd)
     const cc_Mesh *cage = subd->cage;
     const int32_t edgeCount = ccm_EdgeCount(cage);
     cc_Crease *creasesOut = subd->creases;
-    ccs__RefineCageCreases_Inner<<<EACH_ELEM(edgeCount)>>>(cage, edgeCount, creasesOut);
+    for(int i = 0; i < NUM_GPUS; i++){
+        cudaSetDevice(i);
+        ccs__RefineCageCreases_Inner<<<EACH_ELEM_GPU(edgeCount)>>>(cage, i, edgeCount, creasesOut);
+    }
 }
 
-__global__ void ccs__RefineCreases(cc_Subd *subd, int32_t depth, const cc_Mesh *cage, int32_t creaseCount, int32_t stride, cc_Crease *creasesOut)
+__global__ void ccs__RefineCreases(cc_Subd *subd, int32_t depth, int device_num, const cc_Mesh *cage, int32_t creaseCount, int32_t stride, cc_Crease *creasesOut)
 {
-    CHECK_TID(creaseCount)
-    int32_t edgeID = TID;
+    // CHECK_TID(creaseCount)
+    // int32_t edgeID = TID;
+    int32_t edgeID = NEW_TID(device_num, creaseCount);
+    if(edgeID >= creaseCount  || edgeID >= ((device_num + 1) * PER_GPU(creaseCount))){	
+        return;	
+    }
+
     const int32_t nextID = ccs_CreaseNextID_Fast(subd, edgeID, depth);
     const int32_t prevID = ccs_CreasePrevID_Fast(subd, edgeID, depth);
     const bool t1 = ccs_CreasePrevID_Fast(subd, nextID, depth) == edgeID && nextID != edgeID;
@@ -672,7 +709,12 @@ void ccs__RefineCreases(cc_Subd *subd, int32_t depth)
     const int32_t creaseCount = ccm_CreaseCountAtDepth(cage, depth);
     const int32_t stride = ccs_CumulativeCreaseCountAtDepth(cage, depth);
     cc_Crease *creasesOut = &subd->creases[stride];
-    ccs__RefineCreases<<<EACH_ELEM(creaseCount)>>>(subd, depth, cage, creaseCount, stride, creasesOut);
+
+    for(int i = 0; i < NUM_GPUS; i++){
+        cudaSetDevice(i);
+        ccs__RefineCreases<<<EACH_ELEM_GPU(creaseCount)>>>(subd, depth, i, cage, creaseCount, stride, creasesOut);
+    }
+    
 }
 
 void ccs_RefineCreases(cc_Subd *subd)
@@ -680,8 +722,10 @@ void ccs_RefineCreases(cc_Subd *subd)
     const int32_t maxDepth = ccs_MaxDepth(subd);
 
     ccs__RefineCageCreases(subd);
+    cudaDeviceSynchronize();
 
     for (int32_t depth = 1; depth < maxDepth; ++depth) {
         ccs__RefineCreases(subd, depth);
+        cudaDeviceSynchronize();
     }
 }
