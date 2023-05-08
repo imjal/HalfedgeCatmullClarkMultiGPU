@@ -307,18 +307,7 @@ int main(int argc, char **argv)
     // std::cout << "Moving Data Time " << seconds << "\n";
 
     LOG("Refining... I have changed the code");
-    {
-        const BenchStats stats = BenchMemory(&touch_memory, subd, maxDepth);
 
-        LOG("Creases      -- median/mean/min/max (ms): %f / %f / %f / %f",
-            stats.median * 1e3,
-            stats.mean * 1e3,
-            stats.min * 1e3,
-            stats.max * 1e3);
-    }
-    
-
-    LOG("Refining... I have changed the code");
     {
         const BenchStats stats = Bench(&ccs_RefineCreases, subd);
 

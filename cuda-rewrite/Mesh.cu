@@ -3,6 +3,11 @@
 #include <cuda.h>
 #include <iostream>
 
+// GPU macros
+#define NUM_GPUS 4
+#define PER_GPU(num_elems) (num_elems + NUM_GPUS - 1)/NUM_GPUS
+
+
 /*******************************************************************************
  * Create header
  *
@@ -409,6 +414,19 @@ ccm_Create(
     cudaMallocManaged((void**)&mesh->vertexPoints, vertexByteCount);
     cudaMallocManaged((void**)&mesh->uvs, uvByteCount);
 
+
+    for(int i = 0; i < NUM_GPUS; i++){
+        cudaMemPrefetchAsync(mesh, sizeof(cc_Mesh), i); 
+
+        cudaMemPrefetchAsync(mesh->vertexToHalfedgeIDs + i * PER_GPU(vertexCount) , PER_GPU(vertexCount) * sizeof(int32_t), i);
+        cudaMemPrefetchAsync(mesh->edgeToHalfedgeIDs + i *  PER_GPU(edgeCount), PER_GPU(edgeCount) * sizeof(int32_t), i);
+        cudaMemPrefetchAsync(mesh->faceToHalfedgeIDs + i *  PER_GPU(faceCount), PER_GPU(faceCount) * sizeof(int32_t), i);
+        cudaMemPrefetchAsync(mesh->halfedges + i * PER_GPU(halfedgeCount), PER_GPU(halfedgeCount) * sizeof(cc_Halfedge), i);
+        cudaMemPrefetchAsync(mesh->creases + i *  PER_GPU(edgeCount), PER_GPU(edgeCount) * sizeof(cc_Crease), i);
+        cudaMemPrefetchAsync(mesh->vertexPoints + i *  PER_GPU(vertexCount), PER_GPU(vertexCount) * sizeof(cc_VertexPoint), i);
+        cudaMemPrefetchAsync(mesh->uvs + i *  PER_GPU(uvCount), PER_GPU(uvCount) * sizeof(cc_VertexUv), i);
+    }
+
     // mesh->vertexToHalfedgeIDs = (int32_t *)malloc(sizeof(int32_t) * vertexCount);
     // mesh->edgeToHalfedgeIDs = (int32_t *)malloc(sizeof(int32_t) * edgeCount);
     // mesh->faceToHalfedgeIDs = (int32_t *)malloc(sizeof(int32_t) * faceCount);
@@ -775,6 +793,13 @@ cc_Subd *ccs_Create(const cc_Mesh *cage, int32_t maxDepth)
     // subd->creases = (cc_Crease *)malloc(creaseByteCount);
     // subd->vertexPoints = (cc_VertexPoint *)malloc(vertexPointByteCount);
     subd->cage = cage;
+
+    for(int i = 0; i < NUM_GPUS; i++){
+        cudaMemPrefetchAsync(subd, sizeof(cc_Subd), i);
+        cudaMemPrefetchAsync(subd->halfedges + i * PER_GPU(halfedgeCount), PER_GPU(halfedgeCount) * sizeof(cc_Halfedge), i);
+        cudaMemPrefetchAsync(subd->creases + i *  PER_GPU(creaseCount), PER_GPU(creaseCount) * sizeof(cc_Crease), i);
+        cudaMemPrefetchAsync(subd->vertexPoints + i *  PER_GPU(vertexCount), PER_GPU(vertexCount) * sizeof(cc_VertexPoint), i);
+    }
 
     return subd;
 }
