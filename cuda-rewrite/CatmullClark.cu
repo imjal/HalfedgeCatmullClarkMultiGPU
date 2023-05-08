@@ -186,14 +186,14 @@ void ccs__ClearVertexPoints(cc_Subd *subd)
 
 __global__ void ccs__CageFacePoints_Scatter_Inner(const cc_Mesh *cage, int32_t vertexCount, int32_t halfedgeCount, cc_VertexPoint *newFacePoints)
 {
-    // CHECK_TID(halfedgeCount)
-    // int32_t halfedgeID = TID;
-    int device_num = 0;
-    cudaGetDevice(&device_num);
-    int32_t halfedgeID = NEW_TID(device_num, halfedgeCount);
-    if(halfedgeID >= halfedgeCount || halfedgeID >= (device_num + 1) * PER_GPU(halfedgeCount)){
-        return;
-    }
+    CHECK_TID(halfedgeCount)
+    int32_t halfedgeID = TID;
+    // int device_num = 0;
+    // cudaGetDevice(&device_num);
+    // int32_t halfedgeID = NEW_TID(device_num, halfedgeCount);
+    // if(halfedgeID >= halfedgeCount || halfedgeID >= (device_num + 1) * PER_GPU(halfedgeCount)){
+    //     return;
+    // }
     const cc_VertexPoint vertexPoint = ccm_HalfedgeVertexPoint(cage, halfedgeID);
     const int32_t faceID = ccm_HalfedgeFaceID(cage, halfedgeID);
     double faceVertexCount = 1.0;
@@ -221,10 +221,10 @@ void ccs__CageFacePoints_Scatter(cc_Subd *subd)
     const int32_t halfedgeCount = ccm_HalfedgeCount(cage);
     cc_VertexPoint *newFacePoints = &subd->vertexPoints[vertexCount];
     
-    for(int i = 0; i < NUM_GPUS; i++){
-        cudaSetDevice(i);
-        ccs__CageFacePoints_Scatter_Inner<<<EACH_ELEM(halfedgeCount)>>>(cage, vertexCount, halfedgeCount, newFacePoints);
-    }
+    // for(int i = 0; i < NUM_GPUS; i++){
+    //     cudaSetDevice(i);
+    ccs__CageFacePoints_Scatter_Inner<<<EACH_ELEM(halfedgeCount)>>>(cage, vertexCount, halfedgeCount, newFacePoints);
+    // }
 }
 
 __global__ void ccs__CreasedCageEdgePoints_Scatter_Inner(const cc_Mesh *cage, int32_t faceCount, int32_t vertexCount, int32_t halfedgeCount, const cc_VertexPoint *newFacePoints, cc_VertexPoint *newEdgePoints)
