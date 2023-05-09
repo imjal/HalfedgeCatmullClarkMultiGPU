@@ -14,6 +14,8 @@
 #endif
 void ccs__RefineTopology(cc_Subd *subd);
 
+void touch_memory(cc_Subd *subd, int32_t maxdepth);
+
 // (re-)compute catmull clark vertex points without semi-sharp creases
  void ccs_Refine_NoCreases_Gather(cc_Subd *subd);
  void ccs_Refine_NoCreases_Scatter(cc_Subd *subd);

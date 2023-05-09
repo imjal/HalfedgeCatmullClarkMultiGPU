@@ -10,7 +10,7 @@
 #define CHECK_TID(count) if (TID >= count) return;
 #define EACH_ELEM(num_elems) (num_elems + NUM_THREADS - 1) / NUM_THREADS, NUM_THREADS
 
-#define NUM_GPUS 1
+#define NUM_GPUS 4
 #define PER_GPU(num_elems) (num_elems + NUM_GPUS - 1)/NUM_GPUS	
 #define NEW_TID(gpu_id, num_elems) (threadIdx.x + blockIdx.x * blockDim.x + gpu_id * PER_GPU(num_elems))	
 #define EACH_ELEM_GPU(num_elems) (PER_GPU(num_elems) + NUM_THREADS - 1) / NUM_THREADS, NUM_THREADS
@@ -728,4 +728,38 @@ void ccs_RefineCreases(cc_Subd *subd)
         ccs__RefineCreases(subd, depth);
         cudaDeviceSynchronize();
     }
+}
+
+__global__ void touch_memory(cc_Subd *subd, int device_num, int depth)
+{
+        const cc_Mesh *cage = subd->cage;
+
+        const int32_t creaseCount = ccm_CreaseCountAtDepth(cage, depth);
+        // do something that requires the memory be here
+        // CHECK_ASSIGN_TID(edgeID, creaseCount)
+        // // int32_t edgeID = TID;
+        int32_t edgeID = NEW_TID(device_num, creaseCount);
+        if(edgeID >= creaseCount  || edgeID >= ((device_num + 1) * PER_GPU(creaseCount))){
+            return;	
+        }
+        const int32_t nextID = ccs_CreaseNextID_Fast(subd, edgeID, depth);
+        const int32_t prevID = ccs_CreasePrevID_Fast(subd, edgeID, depth);
+        const bool t1 = ccs_CreasePrevID_Fast(subd, nextID, depth) == edgeID && nextID != edgeID;
+        const bool t2 = ccs_CreaseNextID_Fast(subd, prevID, depth) == edgeID && prevID != edgeID;
+        const double thisS = 3.0f * ccs_CreaseSharpness_Fast(subd, edgeID, depth);
+        const double nextS = ccs_CreaseSharpness_Fast(subd, nextID, depth);
+        const double prevS = ccs_CreaseSharpness_Fast(subd, prevID, depth);
+
+}
+
+void touch_memory(cc_Subd *subd, int32_t maxDepth)
+{
+    const int32_t creaseCount = ccm_CreaseCountAtDepth(subd->cage, maxDepth);
+    #pragma omp parallel for
+    for(int i = 0; i < NUM_GPUS; i++){
+        cudaSetDevice(i);
+        touch_memory<<<EACH_ELEM_GPU(creaseCount)>>>(subd, i, maxDepth);
+    }
+
+    cudaDeviceSynchronize();
 }
