@@ -115,7 +115,7 @@ ExportToObj(
 }
 
 typedef struct {
-    double min, max, median, mean;
+    double min, max, median, mean, variance;
 } BenchStats;
 
 static int CompareCallback(const void * a, const void * b)
@@ -174,6 +174,12 @@ BenchStats Bench(void (*SubdCallback)(cc_Subd *subd), cc_Subd *subd)
     stats.median = times[runCount / 2];
     stats.mean = timesTotal / runCount;
 
+    stats.variance = 0;
+    for(int j = 0; j < runCount; j++){
+        stats.variance += (times[j] - stats.mean) * (times[j] - stats.mean);
+    }
+    stats.variance = sqrt(stats.variance / runCount);
+
     free(times);
 
     return stats;
@@ -217,35 +223,38 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    LOG("Refining... I have changed the code");
+    // LOG("Refining... I have changed the code");
     {
         const BenchStats stats = Bench(&ccs_RefineCreases, subd);
 
-        LOG("Creases      -- median/mean/min/max (ms): %f / %f / %f / %f",
+        LOG("%f, %f, %f, %f, %f",
             stats.median * 1e3,
             stats.mean * 1e3,
             stats.min * 1e3,
-            stats.max * 1e3);
+            stats.max * 1e3,
+            stats.variance * 1e3);
     }
 
     {
         const BenchStats stats = Bench(&ccs_RefineHalfedges, subd);
 
-        LOG("Halfedges    -- median/mean/min/max (ms): %f / %f / %f / %f",
+        LOG("%f, %f, %f, %f, %f",
             stats.median * 1e3,
             stats.mean * 1e3,
             stats.min * 1e3,
-            stats.max * 1e3);
+            stats.max * 1e3,
+            stats.variance * 1e3);
     }
 
     {
         const BenchStats stats = Bench(&ccs_RefineVertexPoints_Scatter, subd);
 
-        LOG("VertexPoints -- median/mean/min/max (ms): %f / %f / %f / %f",
+        LOG("%f, %f, %f, %f, %f",
             stats.median * 1e3,
             stats.mean * 1e3,
             stats.min * 1e3,
-            stats.max * 1e3);
+            stats.max * 1e3,
+            stats.variance * 1e3);
     }
 
 // #ifndef CC_DISABLE_UV
@@ -260,19 +269,19 @@ int main(int argc, char **argv)
 //     }
 // #endif
 
-    if (exportToObj > 0) {
-        char buffer[64];
+    // if (exportToObj > 0) {
+    //     char buffer[64];
 
-        LOG("Exporting...");
-        for (int32_t depth = 0; depth <= maxDepth; ++depth) {
-            sprintf(buffer, "subd_%01i_creases.obj", depth);
+    //     LOG("Exporting...");
+    //     for (int32_t depth = 0; depth <= maxDepth; ++depth) {
+    //         sprintf(buffer, "subd_%01i_creases.obj", depth);
 
-            ExportToObj(subd, depth, buffer);
-            LOG("Level %i: done.", depth);
-        }
-    }
+    //         ExportToObj(subd, depth, buffer);
+    //         LOG("Level %i: done.", depth);
+    //     }
+    // }
 
-    LOG("All done!");
+    // LOG("All done!");
 
     ccm_Release(cage);
     ccs_Release(subd);

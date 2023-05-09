@@ -3,6 +3,8 @@
 #include <time.h>
 #include <omp.h>
 #include <cuda.h>
+#include <iostream>
+#include <chrono>
 
 #define LOG(fmt, ...) fprintf(stdout, fmt "\n", ##__VA_ARGS__); fflush(stdout);
 
@@ -108,7 +110,7 @@ ExportToObj(
 }
 
 typedef struct {
-    double min, max, median, mean;
+    double min, max, median, mean, variance;
 } BenchStats;
 
 static int CompareCallback(const void * a, const void * b)
@@ -127,7 +129,7 @@ BenchStats Bench(void (*SubdCallback)(cc_Subd *subd), cc_Subd *subd)
 #ifdef FLAG_BENCH
     const int32_t runCount = 100;
 #else
-    const int32_t runCount = 1;
+    const int32_t runCount = 100;
 #endif
 #ifdef _WIN32
     DWORD startTime, stopTime;
@@ -139,6 +141,7 @@ BenchStats Bench(void (*SubdCallback)(cc_Subd *subd), cc_Subd *subd)
     BenchStats stats = {0.0, 0.0, 0.0, 0.0};
 
     for (int32_t runID = 0; runID < runCount; ++runID) {
+        // if(runID % 10 == 0) printf("runID %d\n", runID);
         double time = 0.0;
 
 #ifdef _WIN32
@@ -168,6 +171,12 @@ BenchStats Bench(void (*SubdCallback)(cc_Subd *subd), cc_Subd *subd)
     stats.median = times[runCount / 2];
     stats.mean = timesTotal / runCount;
 
+    stats.variance = 0;
+    for(int j = 0; j < runCount; j++){
+        stats.variance += (times[j] - stats.mean) * (times[j] - stats.mean);
+    }
+    stats.variance = sqrt(stats.variance / runCount);
+
     free(times);
 
     return stats;
@@ -178,7 +187,7 @@ BenchStats BenchDepth(void (*SubdCallback)(cc_Subd *subd, int32_t maxDepth), cc_
 #ifdef FLAG_BENCH
     const int32_t runCount = 100;
 #else
-    const int32_t runCount = 1;
+    const int32_t runCount = 100;
 #endif
 #ifdef _WIN32
     DWORD startTime, stopTime;
@@ -224,6 +233,25 @@ BenchStats BenchDepth(void (*SubdCallback)(cc_Subd *subd, int32_t maxDepth), cc_
     return stats;
 }
 
+__global__ void mykernel(int *addr) {
+//   atomicAdd_system(addr, 1);       // only available on devices with compute capability 6.x
+  int x = 0;
+  return;
+}
+
+void foo() {
+    int *addr;
+    // cudaMallocManaged(&addr, 4);
+    // *addr = 0;
+    for(int i = 0; i < 4; i++){
+        cudaSetDevice(i);
+        mykernel<<<1, 30>>>(addr);
+    }
+    cudaDeviceSynchronize();
+    
+    // __sync_fetch_and_add(addr, 10);  // CPU atomic operation
+}
+
 int main(int argc, char **argv)
 {
     const char *filename = "./Kitchen_PUP.ccm";
@@ -262,45 +290,61 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    LOG("Refining... I have changed the code");
+    // LOG("Refining... I have changed the code");
 
-    {
-        const BenchStats stats = BenchDepth(&touch_memory, subd, maxDepth);
+    // {
+    //     const BenchStats stats = BenchDepth(&touch_memory, subd, maxDepth);
 
-        LOG("Creases      -- median/mean/min/max (ms): %f / %f / %f / %f",
-            stats.median * 1e3,
-            stats.mean * 1e3,
-            stats.min * 1e3,
-            stats.max * 1e3);
-    }
+    //     LOG("Creases      -- median/mean/min/max (ms): %f / %f / %f / %f",
+    //         stats.median * 1e3,
+    //         stats.mean * 1e3,
+    //         stats.min * 1e3,
+    //         stats.max * 1e3);
+    // }
+
+    auto start_time = std::chrono::steady_clock::now();
+    foo();
+    auto end_time = std::chrono::steady_clock::now();
+
+    std::chrono::duration<double, std::milli> diff = end_time - start_time;
+    double seconds = diff.count();
+    
+
+    // Finalize
+    // std::cout << "Moving Data Time " << seconds << "\n";
+    std::cout << "\n\n";
+
     {
         const BenchStats stats = Bench(&ccs_RefineCreases, subd);
 
-        LOG("Creases      -- median/mean/min/max (ms): %f / %f / %f / %f",
+        LOG("%f, %f, %f, %f, %f",
             stats.median * 1e3,
             stats.mean * 1e3,
             stats.min * 1e3,
-            stats.max * 1e3);
+            stats.max * 1e3,
+            stats.variance * 1e3);
     }
 
     {
         const BenchStats stats = Bench(&ccs_RefineHalfedges, subd);
 
-        LOG("Halfedges    -- median/mean/min/max (ms): %f / %f / %f / %f",
+        LOG("%f, %f, %f, %f, %f",
             stats.median * 1e3,
             stats.mean * 1e3,
             stats.min * 1e3,
-            stats.max * 1e3);
+            stats.max * 1e3,
+            stats.variance * 1e3);
     }
 
     {
         const BenchStats stats = Bench(&ccs_RefineVertexPoints_Scatter, subd);
 
-        LOG("VertexPoints -- median/mean/min/max (ms): %f / %f / %f / %f",
+        LOG("%f, %f, %f, %f, %f",
             stats.median * 1e3,
             stats.mean * 1e3,
             stats.min * 1e3,
-            stats.max * 1e3);
+            stats.max * 1e3,
+            stats.variance * 1e3);
     }
 
 // #ifndef CC_DISABLE_UV
@@ -327,7 +371,7 @@ int main(int argc, char **argv)
     //     }
     // }
 
-    LOG("All done!");
+    // LOG("All done!");
 
     ccm_Release(cage);
     ccs_Release(subd);
